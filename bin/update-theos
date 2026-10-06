@@ -42,8 +42,9 @@ cd "$THEOS"
 git config submodule.fetchJobs 4
 
 # Update Theos itself, then submodules.
-git pull --all --rebase=false
-git submodule update --init --recursive
+git fetch origin # roothide/theos
+git reset --hard origin/master # roothide/theos
+git submodule update --init --recursive --force # roothide/theos
 
 # The Theos update may need to do some extra stuff, so run the post-update script here.
 exec bin/post-update

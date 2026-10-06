@@ -1,0 +1,50 @@
+name: Fork Sync
+
+# Every 6 hours: rebase roothide/theos (and its forked submodules roothide/headers
+# and roothide/lib) onto their upstream theos/* counterparts. See
+# .github/scripts/fork-sync.sh for the algorithm and the "follow the superproject
+# gitlink" policy. On a real conflict the script exits non-zero so the run fails and
+# GitHub sends its built-in failure email — no issues are filed.
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # every 6 hours
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: rebase and report only — no push'
+        type: boolean
+        default: true        # clicking "Run workflow" is safe by default
+
+permissions:
+  contents: read             # cross-repo pushes use the PAT, not GITHUB_TOKEN
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false  # never interrupt a rebase/push: it would desync the 3 repos
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Only inject the PAT for a run that will actually push: on master AND not a dry-run.
+      # Scheduled runs (real) get it; dry-runs and any non-master run get an empty value, so a
+      # dispatched dry-run from a branch can never read the token even if its script is tampered.
+      THEOS_SYNC_TOKEN: ${{ (github.ref == 'refs/heads/master' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)) && secrets.THEOS_SYNC_TOKEN || '' }}
+      DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'true' || 'false' }}
+    steps:
+      - name: Checkout roothide/theos
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # full history — rebase needs it (do NOT use 1)
+          submodules: false        # forked submodules are initialised with full depth by the script
+          # Checkout uses the default GITHUB_TOKEN (it has Contents:read, enough for this
+          # public repo). The PAT is deliberately NOT used here — it's only needed for the
+          # cross-repo PUSHES, which the script does via an explicit token-in-URL. Keeping the
+          # PAT out of checkout means a bad/expired PAT can't break reads or the dry-run.
+          # persist-credentials:false so no stored extraheader clashes with that URL cred.
+          persist-credentials: false
+
+      - name: Rebase onto upstream
+        run: bash .github/scripts/fork-sync.sh
